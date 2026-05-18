@@ -1,0 +1,83 @@
+# =============================================================================
+# agtp-drupal — Drupal module wrapping agtp-php
+# =============================================================================
+# Composer: agtp/agtp-drupal  (type: drupal-module)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Secrets — never commit any of these, ever
+# -----------------------------------------------------------------------------
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.der
+*.gpg
+*.asc
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+
+# -----------------------------------------------------------------------------
+# Composer artifacts
+# -----------------------------------------------------------------------------
+vendor/
+composer.lock
+.phpunit.result.cache
+.phpunit.cache/
+
+# PHPUnit coverage reports
+coverage/
+clover.xml
+
+# -----------------------------------------------------------------------------
+# Drupal local-development scaffolding
+# -----------------------------------------------------------------------------
+# A consuming site sets these via drush / settings.local.php; they
+# don't belong in the module repo. Guard against accidental commits
+# of someone's testing site state.
+web/
+settings.local.php
+drush.local.yml
+.drush/
+sites/default/files/
+sites/default/settings.local.php
+
+# -----------------------------------------------------------------------------
+# Editor / IDE / agent tooling
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------------------------------------------------------
+# OS junk
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Local notes / scratchpads
+# -----------------------------------------------------------------------------
+NOTES.md
+TODO.md
+SCRATCH.md
+*.scratch
+*.local
