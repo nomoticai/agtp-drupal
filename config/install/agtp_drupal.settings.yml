@@ -1,0 +1,2 @@
+gateway_socket: /var/run/agtpd/gateway.sock
+module_id: agtp_drupal

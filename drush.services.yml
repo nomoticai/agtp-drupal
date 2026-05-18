@@ -1,0 +1,14 @@
+services:
+  agtp_drupal.commands.serve:
+    class: Drupal\agtp_drupal\Drush\Commands\AgtpServeCommands
+    arguments:
+      - '@agtp_drupal.handler_collector'
+    tags:
+      - { name: drush.command }
+
+  agtp_drupal.commands.export_manifest:
+    class: Drupal\agtp_drupal\Drush\Commands\AgtpExportManifestCommands
+    arguments:
+      - '@agtp_drupal.handler_collector'
+    tags:
+      - { name: drush.command }

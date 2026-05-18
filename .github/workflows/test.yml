@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    name: Unit tests on PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Composer install (without drupal/core for unit tests)
+        run: |
+          # Unit tests don't need a Drupal install. Strip drupal/core
+          # so composer can resolve in CI without a full Drupal harness.
+          php -r "
+            \$d = json_decode(file_get_contents('composer.json'), true);
+            unset(\$d['require']['drupal/core']);
+            unset(\$d['require-dev']['drush/drush']);
+            file_put_contents('composer.json', json_encode(\$d, JSON_PRETTY_PRINT));
+          "
+          composer install --no-interaction --prefer-dist
+      - name: PHPUnit (unit)
+        run: vendor/bin/phpunit --colors=never tests/src/Unit
+
+  # Kernel/Functional tests against a real Drupal install are deferred
+  # until we have a published ddev-based testing scaffold. The unit
+  # tests above cover the collector logic in isolation.

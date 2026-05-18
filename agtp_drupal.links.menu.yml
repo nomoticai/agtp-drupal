@@ -1,0 +1,5 @@
+agtp_drupal.settings:
+  title: 'AGTP for Drupal'
+  description: 'Configure the AGTP gateway socket and view registered handlers.'
+  parent: system.admin_config_services
+  route_name: agtp_drupal.settings

@@ -1,0 +1,10 @@
+agtp_drupal.settings:
+  type: config_object
+  label: 'AGTP for Drupal settings'
+  mapping:
+    gateway_socket:
+      type: string
+      label: 'Gateway socket path or host:port'
+    module_id:
+      type: string
+      label: 'Module identifier reported to agtpd'

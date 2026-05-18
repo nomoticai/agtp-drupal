@@ -5,29 +5,73 @@ A Drupal module that exposes your site to the Agent Transfer Protocol
 Drupal services; AGTP traffic routes through them via the gateway
 protocol.
 
-This module pairs with two Composer packages from the
-[`agtp-php`][agtp-php-repo] repo:
+This module pairs with two other packages:
 
-- **[`agtp/agtp-php`][agtp-php]** — the language library that defines
-  `EndpointContext`, `EndpointResponse`, `EndpointError`, and the
-  `#[AgtpEndpoint]` attribute. Handler classes use these directly.
-- **[`agtp/mod-php`][mod-php]** — the runtime that connects to
-  `agtpd` over a gateway socket. The drush command in this module
-  wraps it.
+- **[agtp-php](https://github.com/nomoticai/agtp-php)** — the language
+  library that defines `EndpointContext`, `EndpointResponse`,
+  `EndpointError`, and the `#[AgtpEndpoint]` attribute. Handler classes
+  use these directly.
+- **[mod_php](https://github.com/nomoticai/agtp-php)** — the runtime
+  that connects to `agtpd` over a gateway socket. The drush command in
+  this module wraps it. Lives in the `agtp-php` repository alongside
+  the SDK.
 
 You do not run a separate `agtpd` daemon as part of Drupal — `agtpd`
-is the AGTP server, you install it once on the host, and it listens
-on TCP/4480 like Apache would on 80. This module is the Drupal-side
-worker that connects to it. The reference daemon (Python) lives in
-the [AGTP spec repo][spec-repo].
+is the AGTP server. You install it once on the host, and it listens on
+TCP/4480 the same way Apache listens on 80. This module is the
+Drupal-side worker that connects to it.
+
+## Why AGTP instead of JSON:API or REST?
+
+You can already expose Drupal content over HTTP via JSON:API. So what
+does AGTP buy you?
+
+**A warm Drupal process per request.** AGTP handlers run inside a
+long-lived `drush agtp:serve` worker. Drupal's container is built
+**once** at worker startup; every subsequent request reuses it. Cold
+boot for a typical Drupal 10 site is 200-500 ms. Warm PHP-FPM behind
+nginx is 50-150 ms per request. The AGTP worker is sub-millisecond per
+request for the dispatch layer plus whatever the handler does — the
+bootstrap tax is paid once at process start, not on every call. For
+agent traffic — which is bursty and often hits the same endpoints
+repeatedly — this is a measurable performance difference.
+
+**Identity and scope at the protocol level.** `$ctx->agentId` is a
+cryptographically verified agent identifier by the time it reaches your
+handler. `$ctx->authorityScope` is the scope claim the daemon already
+checked against the endpoint's declared `requiredScopes`. You don't
+have to rebuild this with JWTs and middleware.
+
+**Attribution at the protocol level.** Every method invocation
+produces a daemon-signed Attribution-Record. Audit logging is the
+transport's job, not yours.
+
+**HTTP keeps working.** AGTP runs on its own port via `agtpd`. Drupal
+answers HTTP on 80/443 as before. The two protocols coexist on the
+same host without interfering.
 
 ## Requirements
 
 - Drupal 10.2+ or Drupal 11
 - PHP 8.1+
-- `agtpd` running locally or on the same host — see the
-  [spec repo's INSTALL.md][spec-install] for daemon setup
+- `agtpd` running locally or on the same host
 - Drush 12+
+
+## Deployment compatibility
+
+| Environment | Long-lived workers? | Status |
+|---|---|---|
+| Self-hosted (VPS, bare metal, Kubernetes, Docker Compose) | Yes — systemd, Supervisor, k8s `Deployment` | **Supported** |
+| Platform.sh | Yes — native worker containers | Recipe pending; should work |
+| DDEV / Lando (local dev) | Yes — custom service overlays | Recipe pending; should work |
+| Acquia Cloud | No native long-running workers | Not supported. Run `agtpd` + worker on a sibling instance. |
+| Pantheon | Quicksilver is event-triggered only | Not supported. Same answer as Acquia. |
+
+AGTP for Drupal is **self-hosted-first**. Sites on PaaS platforms
+without long-running worker support need to run `agtpd` and the
+`drush agtp:serve` worker on a sibling host they control, then point
+the gateway socket at it via TCP loopback (`127.0.0.1:4481`) or over
+the network.
 
 ## Install
 
@@ -36,42 +80,14 @@ composer require agtp/agtp-drupal
 drush en agtp_drupal
 ```
 
-Composer resolves `agtp/agtp-php` and `agtp/mod-php` transitively
-from Packagist.
-
-### Working from local checkouts
-
-If you're developing against unreleased changes to the PHP stack,
-clone the upstream repos as siblings and wire path repositories in
-your site's `composer.json`:
-
-```bash
-git clone https://github.com/nomoticai/agtp-php
-git clone https://github.com/nomoticai/agtp-drupal
-```
-
-```json
-{
-  "repositories": [
-    { "type": "path", "url": "/abs/path/to/agtp-php/agtp-php" },
-    { "type": "path", "url": "/abs/path/to/agtp-php/mod_php" },
-    { "type": "path", "url": "/abs/path/to/agtp-drupal" }
-  ]
-}
-```
-
-Then `composer require agtp/agtp-drupal:@dev` and enable normally.
-
 ## Writing a handler
 
-Three files: a service registration, a handler class, and (optionally)
-a custom module to hold them.
+Three files: a handler class, a service registration tagging it
+`agtp.endpoint`, and (for a fresh module) an info file. Drupal's DI
+container collects everything tagged `agtp.endpoint` and feeds it to
+the worker at boot.
 
 ### 1. The handler class
-
-A plain PHP class with one or more `#[AgtpEndpoint]`-decorated methods.
-Use any Drupal services you need — they're injected through the
-constructor.
 
 ```php
 // web/modules/custom/example_agtp/src/Agtp/RoomHandlers.php
@@ -123,8 +139,8 @@ final class RoomHandlers
 
 ### 2. The service registration
 
-Tag the handler service with `agtp.endpoint`. The collector will pick
-it up at boot.
+Tag the handler service with `agtp.endpoint`. The collector picks it
+up at boot.
 
 ```yaml
 # web/modules/custom/example_agtp/example_agtp.services.yml
@@ -151,6 +167,25 @@ dependencies:
 
 Enable: `drush en example_agtp`.
 
+## Generate the daemon manifest
+
+After authoring handlers, project the `#[AgtpEndpoint]` attributes
+into daemon-side endpoint TOML files. This closes the silent-drift
+gap between the handler attribute and what `agtpd` is configured to
+serve.
+
+```bash
+# Write one TOML per handler into the agtpd endpoints directory
+drush agtp:export-manifest --output=/etc/agtpd/endpoints
+
+# Or preview to stdout
+drush agtp:export-manifest --dry-run
+```
+
+The attribute is the source of truth. Re-run the command after every
+handler change. A typical deploy script runs `drush agtp:export-manifest`
+right after `drush updb` and before `systemctl reload agtp-drupal`.
+
 ## Running the worker
 
 ```bash
@@ -162,13 +197,13 @@ What happens:
 1. Drush bootstraps Drupal so the service container is built and your
    handler service is available.
 2. `AgtpHandlerCollector` walks every service tagged `agtp.endpoint`
-   and calls `HandlerRegistry::registerInstance()` on each, picking
-   up every method decorated with `#[AgtpEndpoint]`.
+   and calls `HandlerRegistry::registerInstance()` on each, picking up
+   every method decorated with `#[AgtpEndpoint]`.
 3. A `GatewayClient` connects to the daemon, performs the handshake,
    receives the daemon's endpoint registration, and dispatches
    requests by looking up the registered handler.
-4. The process serves until the daemon sends `goodbye` or the
-   socket closes.
+4. The process serves until the daemon sends `goodbye` or the socket
+   closes.
 
 ### Production deployment
 
@@ -195,11 +230,23 @@ WantedBy=multi-user.target
 For higher request concurrency, run multiple worker units — `agtpd`
 accepts multiple module connections and routes among them.
 
+## Admin settings
+
+After enabling, the settings page lives at
+`/admin/config/services/agtp`. It shows the configured gateway socket,
+the module identifier reported to `agtpd`, and a read-only listing of
+every endpoint the service container has collected — useful as a
+sanity check after deploy.
+
+The page does not author handlers; handlers are PHP code in your
+custom modules. The page reflects what's in code.
+
 ## Testing handlers
 
-Use [`Agtp\Testing`][testing] to exercise handler methods directly.
-Build a synthetic `EndpointContext`, call the method, assert on the
-result. No daemon, no gateway socket, no AGTP traffic.
+Use [`Agtp\Testing`](https://github.com/nomoticai/agtp-php#testing-handlers)
+to exercise handler methods directly. Build a synthetic
+`EndpointContext`, call the method, assert on the result. No daemon,
+no gateway socket, no AGTP traffic.
 
 ```php
 public function testBookSuccess(): void
@@ -217,39 +264,18 @@ public function testBookSuccess(): void
 ## What this module does not do
 
 - **Does not serve AGTP traffic over Drupal's HTTP request pipeline.**
-  AGTP runs on its own port (4480) via `agtpd`. Drupal answers HTTP
-  on its usual port. The two protocols co-exist on the same host
-  without interfering.
+  AGTP runs on its own port (4480) via `agtpd`. Drupal answers HTTP on
+  its usual port. The two protocols coexist on the same host.
 - **Does not expose handler endpoints to anonymous traffic.**
   Authentication happens at the `agtpd` layer (Agent-ID resolution
   and, when Agent-Cert lands, mTLS). Inside the handler,
   `$ctx->agentId` is the verified agent identity; trust it.
-- **Does not provide a UI to author handlers.** Handlers are PHP
-  code in your modules. A future configuration entity could surface
-  registered endpoints in the admin UI, but the source of truth
-  stays in code (where it belongs).
+- **Does not provide a UI to author handlers.** Handlers are PHP code
+  in your modules. The admin page surfaces what code declared.
 
 ## Related
 
-- [AGTP spec repo][spec-repo] — drafts, `agtpd` reference daemon,
-  cross-language conformance tests
-- [Server-modules architecture][arch] — daemon / module / library
-  layering
-- [Gateway protocol v1][gateway] — wire-level contract between
-  `agtpd` and `mod_php`
-- [`agtp-php`][agtp-php-repo] — handler SDK + `mod_php` runtime
-  (Composer: `agtp/agtp-php` and `agtp/mod-php`)
-- [`agtp-symfony`][symfony], [`agtp-laravel`][laravel],
-  [`agtp-wordpress`][wp] — sibling framework integrations
-
-[agtp-php]: https://packagist.org/packages/agtp/agtp-php
-[mod-php]: https://packagist.org/packages/agtp/mod-php
-[agtp-php-repo]: https://github.com/nomoticai/agtp-php
-[testing]: https://github.com/nomoticai/agtp-php/blob/main/agtp-php/README.md#testing-handlers
-[spec-repo]: https://github.com/nomoticai/agtp
-[spec-install]: https://github.com/nomoticai/agtp/blob/main/README.md
-[arch]: https://github.com/nomoticai/agtp/blob/main/docs/architecture/server-modules.md
-[gateway]: https://github.com/nomoticai/agtp/blob/main/docs/architecture/gateway-protocol-v1.md
-[symfony]: https://github.com/nomoticai/agtp-symfony
-[laravel]: https://github.com/nomoticai/agtp-laravel
-[wp]: https://github.com/nomoticai/agtp-wordpress
+- [`agtp-php`](https://github.com/nomoticai/agtp-php) — the SDK and the
+  `mod_php` runtime
+- [`agtp-symfony`](https://github.com/nomoticai/agtp-symfony) — the
+  Symfony equivalent of this module

@@ -1,0 +1,7 @@
+agtp_drupal.settings:
+  path: '/admin/config/services/agtp'
+  defaults:
+    _form: '\Drupal\agtp_drupal\Form\AgtpSettingsForm'
+    _title: 'AGTP for Drupal'
+  requirements:
+    _permission: 'administer site configuration'
