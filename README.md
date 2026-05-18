@@ -5,25 +5,28 @@ A Drupal module that exposes your site to the Agent Transfer Protocol
 Drupal services; AGTP traffic routes through them via the gateway
 protocol.
 
-This module pairs with two other packages:
+This module pairs with two Composer packages from the
+[`agtp-php`][agtp-php-repo] repo:
 
-- **[agtp-php](../agtp-php/)** — the language library that defines
+- **[`agtp/agtp-php`][agtp-php]** — the language library that defines
   `EndpointContext`, `EndpointResponse`, `EndpointError`, and the
   `#[AgtpEndpoint]` attribute. Handler classes use these directly.
-- **[mod_php](../mod_php/)** — the runtime that connects to `agtpd`
-  over a gateway socket. The drush command in this module wraps it.
+- **[`agtp/mod-php`][mod-php]** — the runtime that connects to
+  `agtpd` over a gateway socket. The drush command in this module
+  wraps it.
 
 You do not run a separate `agtpd` daemon as part of Drupal — `agtpd`
 is the AGTP server, you install it once on the host, and it listens
 on TCP/4480 like Apache would on 80. This module is the Drupal-side
-worker that connects to it.
+worker that connects to it. The reference daemon (Python) lives in
+the [AGTP spec repo][spec-repo].
 
 ## Requirements
 
 - Drupal 10.2+ or Drupal 11
 - PHP 8.1+
-- `agtpd` running locally or on the same host (see the top-level
-  [`README.md`](../README.md))
+- `agtpd` running locally or on the same host — see the
+  [spec repo's INSTALL.md][spec-install] for daemon setup
 - Drush 12+
 
 ## Install
@@ -33,15 +36,26 @@ composer require agtp/agtp-drupal
 drush en agtp_drupal
 ```
 
-If you're working from the AGTP monorepo (not yet on Packagist),
-configure path repositories in your site's `composer.json`:
+Composer resolves `agtp/agtp-php` and `agtp/mod-php` transitively
+from Packagist.
+
+### Working from local checkouts
+
+If you're developing against unreleased changes to the PHP stack,
+clone the upstream repos as siblings and wire path repositories in
+your site's `composer.json`:
+
+```bash
+git clone https://github.com/nomoticai/agtp-php
+git clone https://github.com/nomoticai/agtp-drupal
+```
 
 ```json
 {
   "repositories": [
-    { "type": "path", "url": "/absolute/path/to/agtp/agtp-php" },
-    { "type": "path", "url": "/absolute/path/to/agtp/mod_php" },
-    { "type": "path", "url": "/absolute/path/to/agtp/agtp_drupal" }
+    { "type": "path", "url": "/abs/path/to/agtp-php/agtp-php" },
+    { "type": "path", "url": "/abs/path/to/agtp-php/mod_php" },
+    { "type": "path", "url": "/abs/path/to/agtp-drupal" }
   ]
 }
 ```
@@ -183,10 +197,9 @@ accepts multiple module connections and routes among them.
 
 ## Testing handlers
 
-Use [`Agtp\Testing`](../agtp-php/README.md#testing-handlers) to
-exercise handler methods directly. Build a synthetic
-`EndpointContext`, call the method, assert on the result. No daemon,
-no gateway socket, no AGTP traffic.
+Use [`Agtp\Testing`][testing] to exercise handler methods directly.
+Build a synthetic `EndpointContext`, call the method, assert on the
+result. No daemon, no gateway socket, no AGTP traffic.
 
 ```php
 public function testBookSuccess(): void
@@ -218,9 +231,25 @@ public function testBookSuccess(): void
 
 ## Related
 
-- [`docs/architecture/server-modules.md`](../docs/architecture/server-modules.md)
-  — overall architecture
-- [`docs/architecture/gateway-protocol-v1.md`](../docs/architecture/gateway-protocol-v1.md)
-  — protocol between `agtpd` and `mod_php`
-- [`agtp-php/`](../agtp-php/) — the underlying PHP library
-- [`mod_php/`](../mod_php/) — the runtime module this wraps
+- [AGTP spec repo][spec-repo] — drafts, `agtpd` reference daemon,
+  cross-language conformance tests
+- [Server-modules architecture][arch] — daemon / module / library
+  layering
+- [Gateway protocol v1][gateway] — wire-level contract between
+  `agtpd` and `mod_php`
+- [`agtp-php`][agtp-php-repo] — handler SDK + `mod_php` runtime
+  (Composer: `agtp/agtp-php` and `agtp/mod-php`)
+- [`agtp-symfony`][symfony], [`agtp-laravel`][laravel],
+  [`agtp-wordpress`][wp] — sibling framework integrations
+
+[agtp-php]: https://packagist.org/packages/agtp/agtp-php
+[mod-php]: https://packagist.org/packages/agtp/mod-php
+[agtp-php-repo]: https://github.com/nomoticai/agtp-php
+[testing]: https://github.com/nomoticai/agtp-php/blob/main/agtp-php/README.md#testing-handlers
+[spec-repo]: https://github.com/nomoticai/agtp
+[spec-install]: https://github.com/nomoticai/agtp/blob/main/README.md
+[arch]: https://github.com/nomoticai/agtp/blob/main/docs/architecture/server-modules.md
+[gateway]: https://github.com/nomoticai/agtp/blob/main/docs/architecture/gateway-protocol-v1.md
+[symfony]: https://github.com/nomoticai/agtp-symfony
+[laravel]: https://github.com/nomoticai/agtp-laravel
+[wp]: https://github.com/nomoticai/agtp-wordpress

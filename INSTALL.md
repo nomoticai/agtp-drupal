@@ -2,22 +2,39 @@
 
 The smallest possible installation, from a Drupal 10/11 site to a
 working AGTP endpoint. Assumes you already have `agtpd` running
-somewhere (see the top-level [`README.md`](../README.md)).
+somewhere — see the [spec repo's README][spec-repo] for daemon
+installation.
 
 ## 1. Add the packages
 
 From your site root:
 
 ```bash
-# Until the packages publish to Packagist, point Composer at the
-# monorepo via path repositories. Replace /opt/agtp with wherever
-# you cloned the AGTP source tree.
-composer config repositories.agtp-php   path /opt/agtp/agtp-php
-composer config repositories.mod-php    path /opt/agtp/mod_php
-composer config repositories.agtp-drupal path /opt/agtp/agtp_drupal
+composer require agtp/agtp-drupal
+```
+
+Composer pulls `agtp/agtp-php` and `agtp/mod-php` transitively from
+Packagist.
+
+### Working from local checkouts
+
+If you need an unreleased version, clone the upstream repos as
+siblings and configure path repositories:
+
+```bash
+git clone https://github.com/nomoticai/agtp-php   /opt/agtp-php
+git clone https://github.com/nomoticai/agtp-drupal /opt/agtp-drupal
+```
+
+```bash
+composer config repositories.agtp-php    path /opt/agtp-php/agtp-php
+composer config repositories.mod-php     path /opt/agtp-php/mod_php
+composer config repositories.agtp-drupal path /opt/agtp-drupal
 
 composer require agtp/agtp-drupal:@dev
 ```
+
+[spec-repo]: https://github.com/nomoticai/agtp
 
 ## 2. Enable the module
 
